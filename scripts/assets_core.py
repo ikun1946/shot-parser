@@ -1,4 +1,5 @@
-"""Shared validation and verified TXT export; no model or third-party dependency."""
+"""Shared validation and verified JSON/TXT export; no third-party dependency."""
+import copy
 import json
 import os
 import re
@@ -450,7 +451,8 @@ def validate(data, source_paths=()):
     return report
 
 
-def export_txt(data, output, source_paths=()):
+def export_txt(data, output, source_paths=(), *, include_json=True):
+    """Export verified TXT and a complete JSON package unless explicitly omitted."""
     report = validate(data, source_paths)
     if not report.ok:
         raise ValueError("\n".join(report.errors))
@@ -461,6 +463,7 @@ def export_txt(data, output, source_paths=()):
     written = []
     with tempfile.TemporaryDirectory(prefix=".shot-assets-", dir=output.parent) as temporary:
         staging = Path(temporary)
+        payload = copy.deepcopy(data) if include_json else None
         for asset_type in TYPES:
             items = report.assets[asset_type]
             if not items:
@@ -469,11 +472,39 @@ def export_txt(data, output, source_paths=()):
             folder.mkdir()
             target = folder / (FOLDERS[asset_type] + ".txt")
             expected = [item["description"].replace("\r\n", "\n").rstrip("\r\n") for item in items]
+            if include_json:
+                if report.legacy:
+                    payload[asset_type] = {
+                        name: desc.replace("\r\n", "\n").rstrip("\r\n")
+                        for name, desc in payload[asset_type].items()
+                    }
+                else:
+                    for item, description in zip(payload["assets"][asset_type], expected):
+                        item["description"] = description
             target.write_bytes(("\n@\n".join(expected) + "\n").encode("utf-8"))
             actual = target.read_text(encoding="utf-8").rstrip("\n").split("\n@\n")
             if actual != expected:
                 raise ValueError("TXT 回读校验失败：" + asset_type)
             written.append((FOLDERS[asset_type], len(items)))
+        if include_json:
+            json_target = staging / "资产.json"
+            try:
+                serialized = json.dumps(payload, ensure_ascii=False, indent=2, allow_nan=False)
+            except (TypeError, ValueError) as exc:
+                raise ValueError("完整资产数据无法保存为 JSON：" + str(exc)) from exc
+            json_target.write_bytes((serialized + "\n").encode("utf-8"))
+            restored = load_data(str(json_target))
+            if restored != payload:
+                raise ValueError("JSON 回读校验失败：完整资产数据不一致")
+            for asset_type in TYPES:
+                descriptions = ([item["description"] for item in report.assets[asset_type]]
+                                if report.legacy else
+                                [item["description"] for item in restored["assets"][asset_type]])
+                expected = [desc.replace("\r\n", "\n").rstrip("\r\n") for desc in descriptions]
+                if expected:
+                    txt_target = staging / FOLDERS[asset_type] / (FOLDERS[asset_type] + ".txt")
+                    if txt_target.read_text(encoding="utf-8").rstrip("\n").split("\n@\n") != expected:
+                        raise ValueError("JSON 与 TXT 正文不一致：" + asset_type)
         if not output.exists():
             staging.rename(output)
             # TemporaryDirectory safely tolerates the staging path having been moved.

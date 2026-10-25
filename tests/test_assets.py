@@ -362,16 +362,75 @@ class AssetTests(unittest.TestCase):
         }]}
         self.assertTrue(self.report(data).ok, self.report(data).errors)
 
-    def test_export_txt_exact_roundtrip_no_json(self):
+    def test_export_defaults_to_complete_json_and_classified_txt(self):
+        self.data["assets"]["role"][0]["design_notes"] = {
+            "原文事实": "左眉陈旧伤痕", "美术补全": "灰蓝与米白衣色"}
         output = self.root / "交付"
         report, written = export_txt(self.data, output, [str(self.source)])
         self.assertTrue(report.ok)
         self.assertEqual(sum(n for _, n in written), 3)
-        files = list(output.rglob("*.*"))
-        self.assertEqual(len(files), 3)
-        self.assertTrue(all(f.suffix == ".txt" for f in files))
+        self.assertEqual({f.relative_to(output).as_posix() for f in output.rglob("*") if f.is_file()},
+                         {"资产.json", "角色资产/角色资产.txt", "场景资产/场景资产.txt",
+                          "道具资产/道具资产.txt"})
         self.assertEqual((output / "角色资产" / "角色资产.txt").read_text(encoding="utf-8"),
                          role_text() + "\n")
+        exported = load_data(str(output / "资产.json"))
+        self.assertEqual(exported, self.data)
+        self.assertTrue(validate(exported, [str(self.source)]).ok)
+        self.assertIn("阿月", (output / "资产.json").read_text(encoding="utf-8"))
+        self.assertEqual(exported["assets"]["prop"][0]["importance"],
+                         self.data["assets"]["prop"][0]["importance"])
+        self.assertEqual(exported["requirements"][-1]["status"], "excluded")
+        for asset_type, folder in (("role", "角色资产"), ("scene", "场景资产"), ("prop", "道具资产")):
+            actual = (output / folder / (folder + ".txt")).read_text(encoding="utf-8").rstrip("\n")
+            self.assertEqual(actual.split("\n@\n"),
+                             [a["description"] for a in exported["assets"][asset_type]])
+
+    def test_explicit_txt_only_omits_json(self):
+        output = self.root / "仅TXT"
+        export_txt(self.data, output, [str(self.source)], include_json=False)
+        files = [f for f in output.rglob("*") if f.is_file()]
+        self.assertEqual(len(files), 3)
+        self.assertTrue(all(f.suffix == ".txt" for f in files))
+        self.assertFalse((output / "资产.json").exists())
+
+    def test_existing_empty_directory_receives_json_and_txt(self):
+        output = self.root / "已建空目录"
+        output.mkdir()
+        export_txt(self.data, output, [str(self.source)])
+        self.assertEqual(load_data(str(output / "资产.json")), self.data)
+        self.assertTrue((output / "场景资产" / "场景资产.txt").exists())
+        self.assertTrue((output / "道具资产" / "道具资产.txt").exists())
+
+    def test_json_description_normalization_does_not_mutate_input(self):
+        self.data["assets"]["role"][0]["description"] = role_text().replace("\n", "\r\n") + "\r\n"
+        original = copy.deepcopy(self.data)
+        output = self.root / "换行归一"
+        export_txt(self.data, output, [str(self.source)])
+        exported = load_data(str(output / "资产.json"))
+        self.assertEqual(exported["assets"]["role"][0]["description"], role_text())
+        self.assertEqual(self.data, original)
+
+    def test_unserializable_metadata_leaves_no_partial_delivery(self):
+        self.data["assets"]["role"][0]["design_notes"] = {"不可序列化": object()}
+        output = self.root / "失败交付"
+        with self.assertRaisesRegex(ValueError, "无法保存为 JSON"):
+            export_txt(self.data, output, [str(self.source)])
+        self.assertFalse(output.exists())
+        self.assertEqual(list(self.root.glob(".shot-assets-*")), [])
+
+    def test_corrupt_json_readback_prevents_delivery(self):
+        write_bytes = Path.write_bytes
+
+        def damage_json(target, content):
+            return write_bytes(target, b"{}" if target.name == "资产.json" else content)
+
+        output = self.root / "损坏交付"
+        with patch.object(Path, "write_bytes", new=damage_json):
+            with self.assertRaisesRegex(ValueError, "JSON 回读校验失败"):
+                export_txt(self.data, output, [str(self.source)])
+        self.assertFalse(output.exists())
+        self.assertEqual(list(self.root.glob(".shot-assets-*")), [])
 
     def test_export_multi_asset_separator_and_empty_types(self):
         role = self.data["assets"]["role"][0]
@@ -398,6 +457,11 @@ class AssetTests(unittest.TestCase):
         self.assertFalse((output / "道具资产").exists())
         self.assertFalse(text.startswith("@"))
         self.assertFalse(text.rstrip().endswith("@"))
+        exported = load_data(str(output / "资产.json"))
+        self.assertEqual([a["name"] for a in exported["assets"]["role"]], ["阿月", "阿月"])
+        self.assertEqual([a["variant"] for a in exported["assets"]["role"]], ["基础", "嫁衣"])
+        self.assertEqual(exported["assets"]["scene"], [])
+        self.assertEqual(exported["assets"]["prop"], [])
 
     def test_export_preserves_old_directory_and_rejects_invalid_before_writes(self):
         output = self.root / "旧交付"
@@ -436,6 +500,28 @@ class AssetTests(unittest.TestCase):
                                 encoding="utf-8", capture_output=True)
         self.assertNotEqual(result.returncode, 0)
         self.assertNotIn("Traceback", result.stderr)
+
+    def test_export_cli_stdin_defaults_to_json_and_accepts_explicit_txt_only(self):
+        output = self.root / "命令行默认交付"
+        command = [sys.executable, "-B", str(SCRIPTS / "to_txt.py"), "-", str(output),
+                   "--source", str(self.source)]
+        payload = json.dumps(self.data, ensure_ascii=False)
+        result = subprocess.run(command, input=payload, encoding="utf-8", capture_output=True)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("资产.json", result.stdout)
+        self.assertEqual(load_data(str(output / "资产.json")), self.data)
+        check = subprocess.run(
+            [sys.executable, "-B", str(SCRIPTS / "check_assets.py"),
+             str(output / "资产.json"), "--source", str(self.source)],
+            encoding="utf-8", capture_output=True)
+        self.assertEqual(check.returncode, 0, check.stdout + check.stderr)
+        txt_output = self.root / "命令行仅TXT"
+        command[4] = str(txt_output)
+        result = subprocess.run(command + ["--txt-only"], input=payload,
+                                encoding="utf-8", capture_output=True)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertFalse((txt_output / "资产.json").exists())
+        self.assertTrue((txt_output / "角色资产" / "角色资产.txt").exists())
 
 
 if __name__ == "__main__":

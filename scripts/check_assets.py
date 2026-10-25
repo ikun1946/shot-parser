@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Check in-memory/v2 assets via stdin, or an explicitly supplied data file."""
+"""Check complete v2 assets via stdin or the delivered JSON package."""
 import argparse
 import sys
 
@@ -8,7 +8,7 @@ from assets_core import load_data, validate
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("input", help="- 读取标准输入；也兼容用户指定的数据文件")
+    parser.add_argument("input", help="交付的资产.json，或 - 从标准输入读取完整数据")
     parser.add_argument("--source", action="append", default=[], help="制作分镜或剧本，可重复")
     parser.add_argument("--detail-level", choices=["cinematic"], help="兼容旧参数；详细美术已为默认规范")
     args = parser.parse_args()
