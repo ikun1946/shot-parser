@@ -120,7 +120,9 @@ def scan(path):
                 diagnostics.append({"line": line, "message": label + "栏为空，需人工核对"})
         for name in candidates:
             requirements.append({"type": asset_type, "name": name, "source": source, "line": line,
-                                 "status": "pending", "reason": "需通读确认并映射",
+                                 "status": "pending",
+                                 "reason": ("仅为候选；须确认特殊剧情作用，普通物件归入陈设、服饰或镜头状态"
+                                            if asset_type == "prop" else "需通读确认并映射"),
                                  "episode": episode, "paragraph": paragraph, "shot": shot})
 
     for number, raw in enumerate(text.splitlines(), 1):

@@ -1,6 +1,6 @@
 # shot-parser
 
-**版本：2.0.0** · 分镜与剧本资产解析技能
+**版本：2.0.1** · 分镜与剧本资产解析技能
 
 从分镜或剧本提取角色、场景、道具，结合小说补充设定，撰写可直接用作文生图提示词的精细美术描述。资产名称与制作分镜逐项对应，描述不含真人、动漫、3D 等画风标签或渲染参数。
 
@@ -9,6 +9,8 @@
 ## 功能
 
 - 以制作分镜确定实际需求与调用名称，剧本、小说辅助稳定外貌和世界观。
+- 场景只生成纯环境空镜，无人物、动物、群像、背影或角色倒影。
+- 只独立解析信物、关键证据、特殊法器等重要剧情道具；普通茶盏、桌椅、工具等归入陈设或服饰。
 - 用原文主名、明确别名、实体与版本区分同名人物、换装、成长、形态变化及道具状态。
 - 详细描述五官骨相、发型、比例、衣着层次、材质工艺，以及空间、陈设、配色与光线。
 - 在保留原文关键特征的前提下提升造型协调、辨识度与美术完成度。
@@ -29,7 +31,7 @@ git clone https://github.com/ikun1946/shot-parser.git "$env:USERPROFILE\.codex\s
 安装固定版本：
 
 ```powershell
-git clone --branch v2.0.0 --depth 1 https://github.com/ikun1946/shot-parser.git "$env:USERPROFILE\.codex\skills\shot-parser"
+git clone --branch v2.0.1 --depth 1 https://github.com/ikun1946/shot-parser.git "$env:USERPROFILE\.codex\skills\shot-parser"
 ```
 
 ## 使用
@@ -53,7 +55,7 @@ git clone --branch v2.0.0 --depth 1 https://github.com/ikun1946/shot-parser.git 
 └── 道具资产/道具资产.txt
 ```
 
-没有资产的类型不生成对应文件夹。完整规则见 [SKILL.md](SKILL.md)，精细描述示例见 [美术示例](references/05-examples.md)。
+没有资产的类型不生成对应文件夹；没有特殊剧情道具时不生成道具文件夹。完整规则见 [SKILL.md](SKILL.md)，精细描述示例见 [美术示例](references/05-examples.md)。
 
 ## 脚本与验证
 
@@ -75,6 +77,6 @@ python -B scripts/to_txt.py - "本次资产交付目录" --source "分镜.md"
 
 ## 版本
 
-`VERSION`、`SKILL.md` 的 `metadata.version` 与 Git 标签保持一致。本次版本为 `2.0.0`，标签为 `v2.0.0`。版本记录见 [CHANGELOG.md](CHANGELOG.md)。
+`VERSION`、`SKILL.md` 的 `metadata.version` 与 Git 标签保持一致。本次版本为 `2.0.1`，标签为 `v2.0.1`。版本记录见 [CHANGELOG.md](CHANGELOG.md)。
 
 通过 Git 克隆且没有本地修改时，可以在仓库目录运行 `git pull --ff-only` 拉取更新；固定标签安装的副本需主动选择新的版本标签。

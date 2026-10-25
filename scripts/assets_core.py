@@ -36,6 +36,44 @@ TIME_GROUPS = {
 MATERIAL_RE = re.compile(r"棉|麻|丝|绸|缎|皮|毡|绒|纱|毛呢|羊毛|羊绒|锦|布|木|竹|银|金|铜|铁|钢|珠|玉|骨|角|草|陶|瓷|塑料|树脂|玻璃|金属|合金|合成纤维|聚酯|尼龙|鳞|羽")
 SURFACE_RE = re.compile(r"纹|织|光|磨|缝|绣|编|雕|抛|拉丝|起毛|粗|细|透|软|厚|薄|挺|垂|包边|锁边|补丁|接缝")
 ABSENCE_RE = re.compile(r"无(?:发饰|衣着|服装|衣物|佩饰|配饰|覆盖物|任何)|不(?:具|佩|穿)|未佩|没有")
+PROP_IMPORTANCE_CATEGORIES = ("身份信物", "关键证据", "特殊能力物件", "剧情关键物件", "用户指定")
+SCENE_ENTITY_RE = re.compile(
+    r"人物|角色|人群|有人|众人|一人|两人|数人|路人|行人|侍卫|士兵|村民|少女|少年|姑娘|老人|老者|小孩|孩子|妇人|"
+    r"男子|女子|孩童|侠客|群像|人影|人脸|面孔|侧脸|人形剪影|背影|画中人|远景小人|"
+    r"飞鸟|鸟群|马匹|牛群|羊群|猫咪|犬只|(?:动物|灵兽|萌宠|神兽)(?!纹|图案|装饰)|"
+    r"(?:一|两|几|数|三|四|五|\d+)(?:只|匹|头)(?:猫|狗|鸟|马|牛|羊|鸡|鸭|蛇|兔|鹿)|"
+    r"(?:猫|狗|鸟|马|牛|羊|鸡|鸭|蛇|兔|鹿)(?:正|正在)?(?:蹲在|趴在|卧在|站在|跑过|飞过|飞入)"
+)
+SCENE_ABSENCE_RE = re.compile(
+    r"(?:无|没有|不出现|不添加|不绘制)(?:任何)?"
+    r"(?:活体动物|人物|角色|人群|人影|人形剪影|背影|动物|灵兽|萌宠|神兽|人)"
+)
+PRESENCE_ACTIONS = r"站在|坐在|站立|围坐|行走|走过|奔跑|跪在|倚在|手持|抱着|俯身|背对|剪影|倒影"
+
+
+def check_empty_scene(asset, fields, report, role_names=()):
+    tag = "scene:" + asset["id"]
+    control = fields.get("美术控制", "")
+    if not re.search(r"无(?:任何)?(?:人物|角色)|无人", control) or not re.search(r"无(?:任何)?(?:活体)?动物", control):
+        report.errors.append(f"{tag} 美术控制必须明确纯环境空镜、无人物、无动物")
+    visual_labels = ("空间结构", "视觉陈设与标志物", "材质与工艺", "色彩体系",
+                     "光影", "氛围与情绪", "视觉记忆点", "美术控制")
+    for label in visual_labels:
+        for clause in re.split(r"[，。；;\n]|但是|然而|不过|但", fields.get(label, "")):
+            positive = SCENE_ABSENCE_RE.sub("", clause)
+            if SCENE_ENTITY_RE.search(positive):
+                report.errors.append(f"{tag} {label}含角色或动物内容，场景必须为空环境：{clause.strip()}")
+                continue
+            for name in role_names:
+                escaped = re.escape(name)
+                owned_space = re.sub(
+                    escaped + r"的(?:木桌|书桌|卧房|房间|书房|宅院|院落|旧居|衣柜|座椅|茶具|家具|床榻|房屋)",
+                    "", positive)
+                if ((len(name) >= 2 and name not in {"系统"} and name in owned_space)
+                        or re.search(escaped + r".{0,6}(?:" + PRESENCE_ACTIONS + r")|(?:" +
+                                     PRESENCE_ACTIONS + r").{0,6}" + escaped, owned_space)):
+                    report.errors.append(f"{tag} {label}含角色出场：{name}")
+                    break
 
 
 @dataclass
@@ -128,9 +166,11 @@ def _legacy(data, report):
                 "variant": fields.get("版本", "基础"), "description": desc, "sources": [],
                 "kind": "group" if "群像" in fields else "individual",
             })
+        if asset_type == "prop" and items:
+            report.errors.append("旧版道具缺少特殊剧情依据 importance，请补为 v2 后再导出")
 
 
-def _check_description(asset_type, asset, report):
+def _check_description(asset_type, asset, report, role_names=()):
     tag = f"{asset_type}:{asset['id']}"
     desc = asset["description"]
     if any(line.strip() == "@" for line in desc.splitlines()):
@@ -202,6 +242,7 @@ def _check_description(asset_type, asset, report):
                 units = re.split(r"[、,，]", time.group(2))
                 if any(unit.strip() not in TIME_GROUPS[time.group(1)] for unit in units):
                     report.errors.append(f"{tag} 实际时段与时间档位不一致")
+            check_empty_scene(asset, fields, report, role_names)
         minimum = 450 if asset_type == "scene" else 250
         if len(desc) < minimum:
             report.warnings.append(f"{tag} 描述较短，请复核结构、工艺、色彩和视觉记忆点")
@@ -231,7 +272,7 @@ def validate(data, source_paths=()):
                 report.errors.append(f"assets.{asset_type} 必须为数组")
             else:
                 report.assets[asset_type] = items
-    index, signatures = {}, set()
+    index, signatures, role_names = {}, set(), []
     for asset_type in TYPES:
         valid_items = []
         for asset in report.assets[asset_type]:
@@ -257,8 +298,18 @@ def validate(data, source_paths=()):
             if signature in signatures:
                 report.errors.append(f"{asset_type}:{asset['id']} 同实体同版本重复建档")
             signatures.add(signature)
+            if asset_type == "prop" and not report.legacy:
+                importance = asset.get("importance")
+                if (not isinstance(importance, dict)
+                        or importance.get("category") not in PROP_IMPORTANCE_CATEGORIES
+                        or not nonempty(importance.get("reason"))
+                        or not isinstance(importance.get("sources"), list)
+                        or not importance["sources"]):
+                    report.errors.append(f"prop:{asset['id']} 必须提供特殊剧情依据 importance：有效 category、具体 reason 与 sources")
             valid_items.append(asset)
-            _check_description(asset_type, asset, report)
+            if asset_type == "role" and asset.get("kind") != "voice":
+                role_names.extend([asset["name"], *asset["aliases"]])
+            _check_description(asset_type, asset, report, role_names)
         report.assets[asset_type] = valid_items
     if not index:
         report.errors.append("没有可导出的有效资产")
@@ -293,7 +344,7 @@ def validate(data, source_paths=()):
     if not supplied:
         report.warnings.append("未指定 --source，未独立扫描完整制作文件；只能检查已提供需求和引用")
 
-    def check_ref(ref, names, label):
+    def check_ref(ref, names, label, require_name=True):
         if not isinstance(ref, dict):
             report.errors.append(label + " 来源引用必须为对象")
             return False
@@ -307,7 +358,7 @@ def validate(data, source_paths=()):
         lines = read_source(path)
         if lines is None:
             return False
-        if line > len(lines) or not any(name in lines[line - 1] for name in names):
+        if line > len(lines) or (require_name and not any(name in lines[line - 1] for name in names)):
             report.errors.append(label + " 来源行未出现对应主名/别名")
             return False
         return True
@@ -372,6 +423,18 @@ def validate(data, source_paths=()):
             for name in [asset["name"], *asset["aliases"]]:
                 if not any(name in line for line in naming_lines):
                     report.errors.append(f"{asset_type}:{asset_id} 主名或别名“{name}”没有对应制作来源")
+        if asset_type == "prop" and isinstance(asset.get("importance"), dict):
+            evidence = asset["importance"].get("sources")
+            if isinstance(evidence, list) and evidence:
+                evidence_names = [asset["name"], *asset["aliases"]]
+                named_evidence = False
+                for ref in evidence:
+                    if check_ref(ref, evidence_names, f"prop:{asset_id} 特殊剧情依据", require_name=False):
+                        lines = read_source(ref["source"])
+                        if any(name in lines[ref["line"] - 1] for name in evidence_names):
+                            named_evidence = True
+                if not named_evidence:
+                    report.errors.append(f"prop:{asset_id} 特殊剧情依据至少须含一个明确提到本物的来源行")
     for path in supplied.values():
         try:
             scanned = scan(path)

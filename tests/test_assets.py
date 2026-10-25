@@ -31,14 +31,14 @@ def scene_text(name="刘家正厅", variant="基础", time="白天（清晨）")
             "时代与地域：古代乡村；空间结构：长方形正厅，门在南侧，东窗通风；"
             "视觉陈设与标志物：木桌靠北，窗框内局部可见院子与天空；材质与工艺：夯土墙和哑光木梁；"
             "色彩体系：暖灰与木褐为主；光影：清晨东窗柔光，地面影子向西；"
-            "氛围与情绪：安静朴素；视觉记忆点：窗下窄木台；美术控制：保持行动通道和清晰层次")
+            "氛围与情绪：安静朴素；视觉记忆点：窗下窄木台；美术控制：纯环境空镜，无人物、无动物，保持行动通道和清晰层次")
 
 
-def prop_text(name="白瓷茶盏", variant="基础"):
-    return (f"道具名称：{name}；别名：无；版本：{variant}；道具类别：饮器；美学定位：素净协调；"
-            "外形：直径约九厘米，浅腹圈足；纹样与工艺：素面无纹样，口沿细磨；"
-            "特征：薄口厚底，便于端持；材质：白瓷；色彩与光泽：温白柔光；"
-            "使用状态：口沿完整，圈足有轻微磨痕；美术控制：避免过度装饰")
+def prop_text(name="双鱼玉佩", variant="基础"):
+    return (f"道具名称：{name}；别名：无；版本：{variant}；道具类别：信物佩饰；美学定位：温润协调；"
+            "外形：长约五厘米，两条弧形鱼身首尾相接；纹样与工艺：细阴线刻鳞，边缘细磨；"
+            "特征：顶部小穿孔系素绳；材质：青白玉与棉绳；色彩与光泽：青白柔光；"
+            "使用状态：玉体完整，穿孔有轻微磨痕；美术控制：保持鱼身轮廓清楚，不添加原文未有的铭文")
 
 
 class AssetTests(unittest.TestCase):
@@ -49,15 +49,16 @@ class AssetTests(unittest.TestCase):
         self.source = self.root / "分镜.md"
         self.source.write_text(
             "## 第1集\n段落1｜总时长12秒\n**场景：** 刘家正厅 清晨 室内\n"
-            "出场人物：阿月\n道具：白瓷茶盏\n"
-            "画面：姑娘端起白瓷茶盏，阿月站在东窗前，窗框内可见院子与天空。\n",
+            "出场人物：阿月\n道具：双鱼玉佩、白瓷茶盏\n"
+            "画面：姑娘端起白瓷茶盏，阿月站在东窗前，窗框内可见院子与天空。\n"
+            "台词：阿月：双鱼玉佩是母亲留下的认亲信物。\n",
             encoding="utf-8",
         )
         self.data = {"schema_version": 2, "assets": {"role": [], "scene": [], "prop": []},
                      "requirements": []}
         specs = [("role", "阿月", role_text(), 4, ["姑娘"]),
                  ("scene", "刘家正厅", scene_text(), 3, []),
-                 ("prop", "白瓷茶盏", prop_text(), 5, [])]
+                 ("prop", "双鱼玉佩", prop_text(), 5, [])]
         for asset_type, name, desc, line, aliases in specs:
             asset_id = asset_type + "-001"
             self.data["assets"][asset_type].append({
@@ -65,6 +66,11 @@ class AssetTests(unittest.TestCase):
                 "variant": "基础", "description": desc,
                 "sources": [{"source": str(self.source), "line": line}],
             })
+            if asset_type == "prop":
+                self.data["assets"][asset_type][-1]["importance"] = {
+                    "category": "身份信物", "reason": "原文明确双鱼玉佩是母亲留下的认亲信物",
+                    "sources": [{"source": str(self.source), "line": 7}],
+                }
             self.data["requirements"].append({
                 "type": asset_type, "name": name, "source": str(self.source), "line": line,
                 "status": "mapped", "asset_ids": [asset_id],
@@ -72,6 +78,10 @@ class AssetTests(unittest.TestCase):
         self.data["requirements"].append({
             "type": "role", "name": "姑娘", "source": str(self.source), "line": 6,
             "status": "mapped", "asset_ids": ["role-001"],
+        })
+        self.data["requirements"].append({
+            "type": "prop", "name": "白瓷茶盏", "source": str(self.source), "line": 5,
+            "status": "excluded", "reason": "普通饮具，仅作场景陈设或镜头交互，不独立建立特殊道具",
         })
 
     def report(self, data=None):
@@ -83,7 +93,7 @@ class AssetTests(unittest.TestCase):
 
     def test_source_scan_includes_full_interior_label_and_line(self):
         result = scan(self.source)
-        self.assertEqual([r["name"] for r in result["requirements"]], ["刘家正厅", "阿月", "白瓷茶盏"])
+        self.assertEqual([r["name"] for r in result["requirements"]], ["刘家正厅", "阿月", "双鱼玉佩", "白瓷茶盏"])
         self.assertEqual(result["blocks"][0]["fields"][0]["space"], "室内")
         self.assertEqual(result["requirements"][0]["line"], 3)
         self.assertEqual(result["diagnostics"], [])
@@ -258,6 +268,81 @@ class AssetTests(unittest.TestCase):
 
     def test_window_view_and_empty_room_not_banned(self):
         self.assertTrue(self.report().ok, self.report().errors)
+
+    def test_scene_rejects_characters_background_figures_animals(self):
+        for presence in ("阿月坐在窗下", "窗边的阿月", "门口站着侍卫", "远处有模糊人群", "窗外出现人影",
+                         "墙上挂着人物画像", "地面映出人物倒影", "阴影里浮现人脸", "窗台卧着一只猫", "天空有飞鸟"):
+            with self.subTest(presence=presence):
+                data = copy.deepcopy(self.data)
+                data["assets"]["scene"][0]["description"] = scene_text().replace(
+                    "窗下窄木台；美术控制", "窗下窄木台，" + presence + "；美术控制")
+                report = self.report(data)
+                self.assertTrue(any("角色" in error or "动物" in error for error in report.errors), report.errors)
+
+    def test_scene_requires_explicit_empty_environment_control(self):
+        self.data["assets"]["scene"][0]["description"] = scene_text().replace("纯环境空镜，无人物、无动物，", "")
+        self.assertTrue(any("无人物、无动物" in e for e in self.report().errors))
+
+    def test_architectural_human_character_and_owner_name_are_not_actors(self):
+        self.data["assets"]["scene"][0]["description"] = scene_text().replace(
+            "木桌靠北", "人字梁位于顶面，阿月的木桌靠北")
+        self.assertTrue(self.report().ok, self.report().errors)
+
+    def test_special_prop_requires_reason_category_and_real_evidence(self):
+        for bad in (None, {}, {"category": "普通用品", "reason": "端起过", "sources": []},
+                    {"category": "身份信物", "reason": "", "sources": [{"source": str(self.source), "line": 7}]}):
+            data = copy.deepcopy(self.data)
+            data["assets"]["prop"][0]["importance"] = bad
+            self.assertTrue(any("importance" in e for e in self.report(data).errors))
+
+    def test_prop_importance_rejects_invalid_evidence(self):
+        for line in (2, 999):
+            data = copy.deepcopy(self.data)
+            data["assets"]["prop"][0]["importance"]["sources"][0]["line"] = line
+            self.assertFalse(self.report(data).ok)
+
+    def test_prop_importance_allows_linked_multiline_evidence(self):
+        self.source.write_text(self.source.read_text(encoding="utf-8") +
+                               "台词：这就是母亲留下的认亲信物。\n", encoding="utf-8")
+        self.data["assets"]["prop"][0]["importance"]["sources"] = [
+            {"source": str(self.source), "line": 5}, {"source": str(self.source), "line": 8}]
+        self.assertTrue(self.report().ok, self.report().errors)
+
+    def test_ordinary_prop_interaction_does_not_require_prop_asset(self):
+        self.data["assets"]["prop"] = []
+        for req in self.data["requirements"]:
+            if req["type"] == "prop":
+                req.update(status="excluded", reason="本次仅核对角色与环境，普通物件归入环境陈设")
+                req.pop("asset_ids", None)
+        self.source.write_text(self.source.read_text(encoding="utf-8").replace(
+            "双鱼玉佩、白瓷茶盏", "白瓷茶盏").replace(
+            "台词：阿月：双鱼玉佩是母亲留下的认亲信物。\n", ""), encoding="utf-8")
+        self.data["requirements"] = [r for r in self.data["requirements"] if r["name"] != "双鱼玉佩"]
+        self.assertTrue(self.report().ok, self.report().errors)
+        output = self.root / "没有特殊道具"
+        export_txt(self.data, output, [str(self.source)])
+        self.assertFalse((output / "道具资产").exists())
+
+    def test_ordinary_shaped_object_can_be_special_with_explicit_plot_role(self):
+        prop = self.data["assets"]["prop"][0]
+        prop["name"] = "白瓷茶盏"
+        prop["description"] = (
+            "道具名称：白瓷茶盏；别名：无；版本：基础；道具类别：涉案饮器；美学定位：素净温润；"
+            "外形：薄口浅腹，小圈足；纹样与工艺：素面无纹样，口沿细磨；"
+            "特征：内壁局部残留浅褐沉积；材质：细密白瓷；色彩与光泽：温白柔光；"
+            "使用状态：器身完整，内底保留原文所述残迹；美术控制：保留关键残迹，不添加新铭文")
+        prop["importance"] = {"category": "关键证据", "reason": "原文明说它留有毒物残迹，是毒案证据",
+                              "sources": [{"source": str(self.source), "line": 7}]}
+        self.source.write_text(self.source.read_text(encoding="utf-8").replace("双鱼玉佩", "白瓷茶盏").replace(
+            "白瓷茶盏、白瓷茶盏", "白瓷茶盏").replace("是母亲留下的认亲信物", "留有毒物残迹，是毒案证据"), encoding="utf-8")
+        self.data["requirements"] = [r for r in self.data["requirements"] if r["name"] not in ("白瓷茶盏", "双鱼玉佩")]
+        self.data["requirements"].append({"type": "prop", "name": "白瓷茶盏", "source": str(self.source),
+                                         "line": 5, "status": "mapped", "asset_ids": ["prop-001"]})
+        self.assertTrue(self.report().ok, self.report().errors)
+
+    def test_legacy_prop_cannot_bypass_special_prop_evidence(self):
+        report = validate({"role": {}, "scene": {}, "prop": {"双鱼玉佩": prop_text()}})
+        self.assertTrue(any("importance" in e for e in report.errors))
 
     def test_voice_only_system_no_mascot_required(self):
         self.source.write_text("出场人物：系统\n声音：系统发出提示音。\n", encoding="utf-8")
